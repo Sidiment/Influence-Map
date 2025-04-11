@@ -52,7 +52,7 @@ The goal of Influence Map is to inspire users and guide them to explore local cu
 
 **Team Influence Map**
 - Github Repository: [Influence Map](https://github.com/Sidiment/Influence-Map.git)
-- Contact Email: influence.map.project@gmail.com
+- Contact Email: zhao1010@uw.edu
 
 Feel free to reach out with any questions, feedback, or collaboration ideas!
 
