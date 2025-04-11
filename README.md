@@ -40,11 +40,11 @@ The goal of Influence Map is to inspire users and guide them to explore local cu
 
 | Phase                  | Timeline          |
 |------------------------|-------------------|
-| Project Planning       | April 2025        |
-| Backend Development    | May 2025          |
-| Frontend Development   | May - June 2025   |
-| Integration & Testing  | June - July 2025  |
-| Launch MVP             | August 2025       |
+| Project Planning       | Week 1-3       |
+| Backend Development    | Week 3-4          |
+| Frontend Development   | Week 5-6   |
+| Integration & Testing  | Week 7-8  |
+| Launch MVP             | Week 9-10       |
 
 ---
 
