@@ -2,6 +2,9 @@
 
 An influencer-based interactive map that visually showcases locations, food, music, and lifestyle activities based on influencers’ real-life experiences.
 
+## Meeting Notes
+https://docs.google.com/document/d/1QvA9VipPeYF9rhBF3LLLn0-haEH9wABkBcePvrbilF8/edit?usp=sharing
+
 ---
 
 ## Project Scope
