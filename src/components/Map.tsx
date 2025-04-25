@@ -97,7 +97,7 @@ export default function Map({ center = [-74.5, 40], zoom = 9 }: MapProps) {
   };
 
   // Function to handle style change
-  const handleStyleChange = (newStyle: string) => {
+  const handleStyleChange = (newStyle: string, isGlobeView: boolean = false) => {
     if (!map.current) return;
 
     // Store current selection state
@@ -105,6 +105,16 @@ export default function Map({ center = [-74.5, 40], zoom = 9 }: MapProps) {
 
     // Change style
     map.current.setStyle(newStyle);
+
+    // Set projection based on view type
+    map.current.setProjection(isGlobeView ? 'globe' : 'mercator');
+    console.log('DEBUG: Switching view with zoom range:', {
+      view: isGlobeView ? 'globe' : '2D',
+      minZoom: map.current.getMinZoom(),
+      maxZoom: map.current.getMaxZoom(),
+      currentZoom: map.current.getZoom(),
+      projection: map.current.getProjection()
+    });
 
     // Wait for style to load
     map.current.once('style.load', () => {
@@ -237,15 +247,16 @@ export default function Map({ center = [-74.5, 40], zoom = 9 }: MapProps) {
       center: center,
       zoom: 2,
       interactive: true,
-      dragRotate: false,
+      dragRotate: true,
       dragPan: true,
       scrollZoom: true,
       doubleClickZoom: false,
-      touchZoomRotate: false,
+      touchZoomRotate: true,
       keyboard: false,
       boxZoom: false,
       minZoom: 1.5,
-      maxZoom: 4
+      maxZoom: 4,
+      projection: 'globe' // Start with globe projection
     });
 
     map.current.on('load', () => {
@@ -357,15 +368,21 @@ export default function Map({ center = [-74.5, 40], zoom = 9 }: MapProps) {
               map.current?.easeTo({
                 center: adjustedCenter,
                 zoom: zoomLevel,
-                duration: 1000,
+                duration: 2000, // Longer duration for smoother transition
                 essential: true,
                 pitch: 0,
                 bearing: 0
               });
 
-              // Then change the style to a more detailed 2D view
+              // Then change the style and projection to 2D
               setTimeout(() => {
-                handleStyleChange('mapbox://styles/mapbox/streets-v12');
+                if (map.current) {
+                  // Update zoom constraints for 2D view
+                  map.current.setMinZoom(4);
+                  map.current.setMaxZoom(10);
+                  // Change to 2D style
+                  handleStyleChange('mapbox://styles/mapbox/streets-v12', false);
+                }
               }, 1000);
             }
           } else {
@@ -383,17 +400,43 @@ export default function Map({ center = [-74.5, 40], zoom = 9 }: MapProps) {
         if (!features || features.length === 0) {
           console.log('DEBUG: Clicking outside - resetting view');
           resetSelection();
-          // Reset to global view
+          
+          // Reset to global view with default zoom
           map.current?.easeTo({
             center: [-74.5, 40],
             zoom: 2,
-            duration: 1000,
+            duration: 2000, // Longer duration for smoother transition
             essential: true,
             pitch: 0,
             bearing: 0
           });
-          // Reset to the original style
-          handleStyleChange('mapbox://styles/mapbox/light-v11');
+
+          // Reset to globe view
+          setTimeout(() => {
+            if (map.current) {
+              // Reset zoom constraints for globe view
+              map.current.setMinZoom(1.5);
+              map.current.setMaxZoom(4);
+              // Change back to globe projection
+              handleStyleChange('mapbox://styles/mapbox/light-v11', true);
+            }
+          }, 1000);
+        }
+      });
+
+      // Add zoom change listener to track zoom levels (with debounce)
+      let zoomTimeout: NodeJS.Timeout;
+      map.current?.on('zoom', () => {
+        if (map.current) {
+          clearTimeout(zoomTimeout);
+          zoomTimeout = setTimeout(() => {
+            console.log('DEBUG: Current view state:', {
+              projection: map.current?.getProjection(),
+              zoom: map.current?.getZoom(),
+              minZoom: map.current?.getMinZoom(),
+              maxZoom: map.current?.getMaxZoom()
+            });
+          }, 100); // Only log after zoom has stopped for 100ms
         }
       });
     });
