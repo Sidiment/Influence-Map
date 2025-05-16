@@ -1,13 +1,25 @@
 # Influencer Map
 
-A modern web application that displays influencer locations on an interactive map. Built with Next.js, TypeScript, and Mapbox.
+A modern web application that displays influencer and user locations on an interactive map. Built with Next.js, TypeScript, and Mapbox.
 
 ## Features
 
+- User authentication (register, login, logout)
 - Interactive map showing influencer locations
-- Searchable profile list
+- Search and follow both influencers and registered users
+- Sidebar with login/register form, followed list, and saved locations
+- Protected map view (only accessible when logged in)
+- Local storage persistence for user data and follows
 - Responsive design with dark mode support
 - Real-time map updates when selecting profiles
+
+## User Experience
+
+- **Login/Register:** Users must log in or register to access the map and social features.
+- **Search & Follow:** Search for influencers (hardcoded) or other registered users. Follow or unfollow anyone from the search results.
+- **Followed List:** See your followed influencers and users in the sidebar, with avatars.
+- **Saved Locations:** (Optional) Users can see their saved map locations in the sidebar.
+- **Protected Map:** The map is only visible after login, ensuring a personalized experience.
 
 ## Tech Stack
 
@@ -46,7 +58,9 @@ npm run dev
 
 - `src/app/`: Contains the application routes and pages
 - `src/components/`: Reusable UI components
-- `src/lib/`: Utility functions and shared logic
+- `src/contexts/`: Authentication context and logic
+- `src/data/`: Hardcoded influencer data
+- `src/types/`: TypeScript types
 - `public/`: Static assets
 
 ## Development
