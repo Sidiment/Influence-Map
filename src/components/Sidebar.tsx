@@ -12,6 +12,8 @@ function getUserAvatar(email: string) {
 export const Sidebar: React.FC = () => {
   const { user, logout } = useAuth();
   const [search, setSearch] = useState('');
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [selectedLocations, setSelectedLocations] = useState<Set<string>>(new Set());
 
   if (!user) {
     return (
@@ -84,6 +86,86 @@ export const Sidebar: React.FC = () => {
   const allById: { [id: string]: Influencer } = {};
   allSearchables.forEach(i => { allById[i.id] = i; });
 
+  // Function to select a location
+  const selectLocation = (locationId: string) => {
+    if (!isEditMode) return;
+    setSelectedLocations(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(locationId)) {
+        newSet.delete(locationId);
+      } else {
+        newSet.add(locationId);
+      }
+      return newSet;
+    });
+  };
+
+  // Function to select all locations
+  const selectAllLocations = () => {
+    if (!isEditMode) return;
+    setSelectedLocations(new Set(user.savedLocations.map(loc => loc.id)));
+  };
+
+  // Function to deselect all locations
+  const deselectAllLocations = () => {
+    if (!isEditMode) return;
+    setSelectedLocations(new Set());
+  };
+
+  // Function to delete selected locations
+  const deleteSelectedLocations = () => {
+    if (!user || selectedLocations.size === 0 || !isEditMode) return;
+
+    // Update saved locations
+    const updatedLocations = user.savedLocations.filter(loc => !selectedLocations.has(loc.id));
+
+    // Update user profile
+    const updatedUser = {
+      ...user,
+      savedLocations: updatedLocations
+    };
+
+    // Update localStorage
+    localStorage.setItem('user', JSON.stringify(updatedUser));
+    
+    // Update users array in localStorage
+    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    const idx = users.findIndex((u: any) => u.email === user.email);
+    if (idx !== -1) {
+      users[idx] = updatedUser;
+      localStorage.setItem('users', JSON.stringify(users));
+    }
+
+    // Clear selection and exit edit mode
+    setSelectedLocations(new Set());
+    setIsEditMode(false);
+
+    // Force a page reload to refresh the sidebar
+    window.location.reload();
+  };
+
+  // Function to toggle edit mode
+  const toggleEditMode = () => {
+    setIsEditMode(!isEditMode);
+    if (!isEditMode) {
+      setSelectedLocations(new Set());
+    }
+  };
+
+  // Function to fly to a location
+  const flyToLocation = (location: SavedLocation) => {
+    if (isEditMode) return;
+    
+    // Dispatch a custom event that the Map component will listen for
+    const event = new CustomEvent('flyToLocation', {
+      detail: {
+        coordinates: location.coordinates,
+        zoom: 12
+      }
+    });
+    window.dispatchEvent(event);
+  };
+
   return (
     <div className="w-80 h-full bg-white shadow-lg p-4 flex flex-col">
       <div className="flex justify-between items-center mb-6">
@@ -155,12 +237,72 @@ export const Sidebar: React.FC = () => {
       </div>
 
       <div>
-        <h3 className="text-lg font-semibold mb-2">Saved Locations</h3>
+        <div className="flex justify-between items-center mb-2">
+          <h3 className="text-lg font-semibold">Saved Locations</h3>
+          <button
+            onClick={toggleEditMode}
+            className={`px-3 py-1 rounded text-white ${
+              isEditMode ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'
+            }`}
+          >
+            {isEditMode ? 'Exit Edit' : 'Edit'}
+          </button>
+        </div>
+
+        {isEditMode && (
+          <div className="mb-4 space-x-2">
+            <button 
+              onClick={selectAllLocations}
+              className="px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
+            >
+              Select All
+            </button>
+            <button 
+              onClick={deselectAllLocations}
+              className="px-2 py-1 bg-gray-500 text-white rounded hover:bg-gray-600"
+            >
+              Deselect All
+            </button>
+            <button 
+              onClick={deleteSelectedLocations}
+              className={`px-2 py-1 text-white rounded ${
+                selectedLocations.size > 0 
+                  ? 'bg-red-500 hover:bg-red-600' 
+                  : 'bg-gray-300 cursor-not-allowed'
+              }`}
+              disabled={selectedLocations.size === 0}
+            >
+              Delete Selected
+            </button>
+          </div>
+        )}
+
         {user.savedLocations.length > 0 ? (
           <ul className="space-y-2">
             {user.savedLocations.map((location: SavedLocation) => (
-              <li key={location.id} className="p-2 bg-gray-50 rounded">
-                <div className="font-medium">{location.name}</div>
+              <li 
+                key={location.id} 
+                className={`p-2 rounded cursor-${isEditMode ? 'pointer' : 'default'} ${
+                  selectedLocations.has(location.id) 
+                    ? 'bg-blue-100 border border-blue-300' 
+                    : 'bg-gray-50'
+                }`}
+                onClick={() => selectLocation(location.id)}
+              >
+                <div className="flex justify-between items-center">
+                  <div className="font-medium">{location.name}</div>
+                  {!isEditMode && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        flyToLocation(location);
+                      }}
+                      className="px-2 py-1 bg-green-500 text-white rounded hover:bg-green-600 text-sm"
+                    >
+                      Go
+                    </button>
+                  )}
+                </div>
                 <div className="text-sm text-gray-500">
                   {location.coordinates[0].toFixed(4)}, {location.coordinates[1].toFixed(4)}
                 </div>
