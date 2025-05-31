@@ -1,14 +1,19 @@
 {
-  "name": "510",
+  "name": "influence-map",
   "version": "0.1.0",
   "private": true,
+  "homepage": "https://sidiment.github.io/Influence-Map",
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d out"
   },
   "dependencies": {
+    "@mapbox/mapbox-gl-geocoder": "^5.0.3",
+    "@types/mapbox__mapbox-gl-geocoder": "^5.0.0",
     "@types/mapbox-gl": "^3.4.1",
     "mapbox-gl": "^3.11.1",
     "next": "15.3.1",
@@ -23,6 +28,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "15.3.1",
+    "gh-pages": "^6.3.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
