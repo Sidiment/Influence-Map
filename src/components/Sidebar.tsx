@@ -224,9 +224,45 @@ export const Sidebar: React.FC = () => {
             {user.followedInfluencers.map((fid) => {
               const inf = allById[fid];
               return inf ? (
-                <li key={fid} className="flex items-center">
-                  <img src={inf.avatar} alt={inf.name} className="w-6 h-6 rounded-full mr-2" />
-                  <span>{inf.name}</span>
+                <li key={fid} className="flex items-center justify-between bg-gray-50 rounded p-2">
+                  <div className="flex items-center">
+                    <img src={inf.avatar} alt={inf.name} className="w-6 h-6 rounded-full mr-2" />
+                    <span>{inf.name}</span>
+                  </div>
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={() => {
+                        // Dispatch event to add pin
+                        const event = new CustomEvent('addPin', {
+                          detail: {
+                            id: inf.id,
+                            name: inf.name,
+                            coordinates: [0, 0], // Default coordinates, will be updated by Map component
+                            type: 'followed'
+                          }
+                        });
+                        window.dispatchEvent(event);
+                      }}
+                      className="px-2 py-1 bg-green-500 text-white rounded hover:bg-green-600 text-xs"
+                    >
+                      Add Pin
+                    </button>
+                    <button
+                      onClick={() => {
+                        // Dispatch event to remove pin
+                        const event = new CustomEvent('removePin', {
+                          detail: {
+                            id: inf.id,
+                            type: 'followed'
+                          }
+                        });
+                        window.dispatchEvent(event);
+                      }}
+                      className="px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-xs"
+                    >
+                      Remove Pin
+                    </button>
+                  </div>
                 </li>
               ) : null;
             })}
