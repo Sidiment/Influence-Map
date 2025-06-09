@@ -4,6 +4,8 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import MapTooltip from './MapTooltip';
 import MapboxGeocoder from '@mapbox/mapbox-gl-geocoder';
 import '@mapbox/mapbox-gl-geocoder/dist/mapbox-gl-geocoder.css';
+import { useAuth } from '../contexts/AuthContext';
+import { SavedLocation } from '../types/user';
 
 mapboxgl.accessToken = 'pk.eyJ1Ijoic2lkaW1lbnQiLCJhIjoiY205ZGVzNDVkMTJ5eTJ0b2RsNTJqaHp6ZCJ9.aIWJ0AlaJti6TsSEEYeHPg';
 
@@ -31,18 +33,20 @@ interface Bounds {
 }
 
 export default function Map({ center = [-74.5, 40], zoom = 9 }: MapProps) {
+  const { user } = useAuth();
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const geocoderContainerRef = useRef<HTMLDivElement>(null);
   const [hoveredCountryId, setHoveredCountryId] = useState<string | null>(null);
   const currentHoveredId = useRef<string | null>(null);
   const [tooltip, setTooltip] = useState<{ countryName: string; x: number; y: number } | null>(null);
-  const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
-  const selectedCountryRef = useRef<string | null>(null);
-  const lastClickTime = useRef<number>(0);
-  const CLICK_COOLDOWN = 1000; // 1 second cooldown between clicks
   const [is2DView, setIs2DView] = useState(false);
   const markers = useRef<mapboxgl.Marker[]>([]);
+  const [savedLocations, setSavedLocations] = useState<SavedLocation[]>([]);
+  const isTransitioning = useRef(false);
+  const lastViewState = useRef({ is2D: false, zoom: 0 });
+  const styleChangeTimeout = useRef<NodeJS.Timeout | null>(null);
+  const pendingStyleChange = useRef<string | null>(null);
 
   // Function to add custom layers
   const addCustomLayers = () => {
@@ -72,16 +76,12 @@ export default function Map({ center = [-74.5, 40], zoom = 9 }: MapProps) {
           'case',
           ['boolean', ['feature-state', 'hover'], false],
           '#ff0000',
-          ['boolean', ['feature-state', 'selected'], false],
-          '#ff6b6b',
           '#e6e6e6'
         ],
         'fill-opacity': [
           'case',
           ['boolean', ['feature-state', 'hover'], false],
           0.8,
-          ['boolean', ['feature-state', 'selected'], false],
-          0.7,
           0.4
         ]
       }
@@ -100,151 +100,181 @@ export default function Map({ center = [-74.5, 40], zoom = 9 }: MapProps) {
     });
   };
 
+  // Function to toggle marker visibility
+  const toggleMarkersVisibility = (visible: boolean) => {
+    markers.current.forEach(marker => {
+      const element = marker.getElement();
+      element.style.display = visible ? 'block' : 'none';
+    });
+  };
+
+  // Function to handle zoom-based view switching
+  const handleZoomChange = () => {
+    if (!map.current || isTransitioning.current) return;
+
+    const currentZoom = map.current.getZoom();
+    const isCurrently2D = is2DView;
+    const shouldBe2D = currentZoom >= 2.5;
+
+    // Debug logging for view state changes
+    console.log('DEBUG: View State Check:', {
+      currentZoom,
+      isCurrently2D,
+      shouldBe2D,
+      isTransitioning: isTransitioning.current,
+      lastState: lastViewState.current
+    });
+
+    // Only trigger view change if we're crossing the threshold
+    if (isCurrently2D !== shouldBe2D) {
+      isTransitioning.current = true;
+      
+      // Clear any pending style changes
+      if (styleChangeTimeout.current) {
+        clearTimeout(styleChangeTimeout.current);
+      }
+
+      console.log('DEBUG: Switching View:', {
+        from: isCurrently2D ? '2D' : '3D',
+        to: shouldBe2D ? '2D' : '3D',
+        zoom: currentZoom
+      });
+
+      // Update state first
+      setIs2DView(shouldBe2D);
+      
+      // Store the pending style change
+      pendingStyleChange.current = shouldBe2D 
+        ? 'mapbox://styles/mapbox/streets-v12'
+        : 'mapbox://styles/mapbox/light-v11';
+
+      // Update zoom constraints based on the new view
+      if (shouldBe2D) {
+        // When switching to 2D, allow zooming in further
+        map.current.setMinZoom(1.5);
+        map.current.setMaxZoom(10);
+      } else {
+        // When switching to 3D, maintain globe view constraints
+        map.current.setMinZoom(1.5);
+        map.current.setMaxZoom(3);
+      }
+
+      // Update last view state
+      lastViewState.current = {
+        is2D: shouldBe2D,
+        zoom: currentZoom
+      };
+
+      // Apply style change after a short delay
+      styleChangeTimeout.current = setTimeout(() => {
+        if (pendingStyleChange.current) {
+          handleStyleChange(pendingStyleChange.current, !shouldBe2D);
+          pendingStyleChange.current = null;
+        }
+        isTransitioning.current = false;
+        console.log('DEBUG: View Transition Complete:', {
+          newView: shouldBe2D ? '2D' : '3D',
+          currentZoom: map.current?.getZoom(),
+          projection: map.current?.getProjection(),
+          is2D: is2DView
+        });
+      }, 100);
+    }
+  };
+
   // Function to handle style change
   const handleStyleChange = (newStyle: string, isGlobeView: boolean = false) => {
     if (!map.current) return;
 
-    // Store current selection state
-    const currentSelection = selectedCountryRef.current;
+    console.log('DEBUG: Style Change:', {
+      from: map.current.getStyle().name,
+      to: newStyle,
+      isGlobeView,
+      currentZoom: map.current.getZoom(),
+      is2D: is2DView
+    });
 
     // Change style
     map.current.setStyle(newStyle);
 
     // Set projection based on view type
     map.current.setProjection(isGlobeView ? 'globe' : 'mercator');
-    console.log('DEBUG: Switching view with zoom range:', {
-      view: isGlobeView ? 'globe' : '2D',
-      minZoom: map.current.getMinZoom(),
-      maxZoom: map.current.getMaxZoom(),
-      currentZoom: map.current.getZoom(),
-      projection: map.current.getProjection()
-    });
+
+    // Toggle markers visibility based on view
+    toggleMarkersVisibility(!isGlobeView);
 
     // Wait for style to load
     map.current.once('style.load', () => {
+      console.log('DEBUG: Style Loaded:', {
+        style: newStyle,
+        projection: map.current?.getProjection(),
+        zoom: map.current?.getZoom(),
+        is2D: is2DView
+      });
+
       // Re-add custom layers
       addCustomLayers();
 
-      // Restore selection if there was one
-      if (currentSelection) {
-        try {
-          map.current?.setFeatureState(
-            { source: 'countries', sourceLayer: 'country_boundaries', id: currentSelection },
-            { selected: true }
-          );
-        } catch (error) {
-          console.error('DEBUG: Error restoring selection state:', error);
-        }
+      // Ensure zoom constraints are set correctly after style change
+      if (is2DView) {
+        map.current?.setMinZoom(1.5);
+        map.current?.setMaxZoom(10);
+      } else {
+        map.current?.setMinZoom(1.5);
+        map.current?.setMaxZoom(3);
       }
     });
   };
 
-  // Function to reset selection
-  const resetSelection = () => {
-    if (selectedCountryRef.current) {
-      console.log('DEBUG: Resetting selection for country:', selectedCountryRef.current);
-      try {
-        map.current?.setFeatureState(
-          { source: 'countries', sourceLayer: 'country_boundaries', id: selectedCountryRef.current },
-          { selected: false }
-        );
-        console.log('DEBUG: Successfully reset feature state for:', selectedCountryRef.current);
-      } catch (error) {
-        console.error('DEBUG: Error resetting feature state:', error);
-      }
-      selectedCountryRef.current = null;
-      setSelectedCountry(null);
-      setIs2DView(false);
-    }
+  // Function to check if a location already exists
+  const isLocationExists = (coordinates: [number, number]): boolean => {
+    return savedLocations.some(loc => 
+      Math.abs(loc.coordinates[0] - coordinates[0]) < 0.0001 && 
+      Math.abs(loc.coordinates[1] - coordinates[1]) < 0.0001
+    );
   };
 
-  // Function to set selection
-  const setSelection = (countryId: string) => {
-    console.log('DEBUG: Setting selection for country:', countryId);
-    console.log('DEBUG: Current selected country:', selectedCountryRef.current);
-    
-    // First reset any existing selection
-    resetSelection();
-    
-    // Then set the new selection
-    try {
-      selectedCountryRef.current = countryId;
-      setSelectedCountry(countryId);
-      map.current?.setFeatureState(
-        { source: 'countries', sourceLayer: 'country_boundaries', id: countryId },
-        { selected: true }
-      );
-      console.log('DEBUG: Successfully set feature state for:', countryId);
-      setIs2DView(true);
-    } catch (error) {
-      console.error('DEBUG: Error setting feature state:', error);
-    }
-  };
+  // Function to save location to user profile
+  const saveLocation = (coordinates: [number, number], name: string) => {
+    if (!user || isLocationExists(coordinates)) return;
 
-  // Function to calculate bounds from coordinates
-  const calculateBounds = (coordinates: number[][]): Bounds => {
-    let minLng = Infinity;
-    let maxLng = -Infinity;
-    let minLat = Infinity;
-    let maxLat = -Infinity;
-
-    coordinates.forEach((coord: number[]) => {
-      minLng = Math.min(minLng, coord[0]);
-      maxLng = Math.max(maxLng, coord[0]);
-      minLat = Math.min(minLat, coord[1]);
-      maxLat = Math.max(maxLat, coord[1]);
-    });
-
-    return {
-      minLng,
-      maxLng,
-      minLat,
-      maxLat,
-      center: [(minLng + maxLng) / 2, (minLat + maxLat) / 2] as [number, number]
+    const newLocation: SavedLocation = {
+      id: Date.now().toString(),
+      name,
+      coordinates,
+      createdAt: new Date()
     };
-  };
 
-  // Function to calculate appropriate zoom level based on bounds
-  const calculateZoomLevel = (bounds: Bounds) => {
-    const lngDiff = Math.abs(bounds.maxLng - bounds.minLng);
-    const latDiff = Math.abs(bounds.maxLat - bounds.minLat);
-    const maxDiff = Math.max(lngDiff, latDiff);
+    const updatedUser = {
+      ...user,
+      savedLocations: [...user.savedLocations, newLocation]
+    };
     
-    // Adjust zoom level based on the size of the country
-    if (maxDiff > 100) return 1.5; // Very large countries
-    if (maxDiff > 50) return 2; // Large countries
-    if (maxDiff > 20) return 2.5; // Medium countries
-    if (maxDiff > 10) return 3; // Small countries
-    return 3.5; // Very small countries
-  };
-
-  // Function to adjust center for large countries
-  const adjustCenterForLargeCountries = (bounds: Bounds, countryName: string): [number, number] => {
-    const lngDiff = Math.abs(bounds.maxLng - bounds.minLng);
-    const latDiff = Math.abs(bounds.maxLat - bounds.minLat);
-    const maxDiff = Math.max(lngDiff, latDiff);
-
-    // Special handling for very large countries
-    if (maxDiff > 100) {
-      switch (countryName) {
-        case 'Russia':
-          return [100, 60];
-        case 'United States':
-          return [-95, 40];
-        case 'Canada':
-          return [-100, 60];
-        case 'China':
-          return [105, 35];
-        default:
-          return bounds.center;
-      }
+    // Update localStorage
+    localStorage.setItem('user', JSON.stringify(updatedUser));
+    
+    // Update users array in localStorage
+    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    const idx = users.findIndex((u: any) => u.email === user.email);
+    if (idx !== -1) {
+      users[idx] = updatedUser;
+      localStorage.setItem('users', JSON.stringify(users));
     }
-    return bounds.center;
+
+    // Update local state
+    setSavedLocations(prev => [...prev, newLocation]);
   };
 
   // Function to add a marker
-  const addMarker = (lngLat: [number, number]) => {
-    if (!map.current) return;
+  const addMarker = (lngLat: [number, number], name?: string) => {
+    if (!map.current || isLocationExists(lngLat)) return;
+
+    console.log('DEBUG: Adding marker:', {
+      coordinates: lngLat,
+      name,
+      is2D: is2DView,
+      currentZoom: map.current.getZoom()
+    });
 
     const marker = new mapboxgl.Marker({
       color: "#FF0000",
@@ -254,16 +284,40 @@ export default function Map({ center = [-74.5, 40], zoom = 9 }: MapProps) {
       .addTo(map.current);
 
     markers.current.push(marker);
-
+    
     // Add click event to remove marker
     marker.getElement().addEventListener('click', () => {
       marker.remove();
       markers.current = markers.current.filter(m => m !== marker);
+      // Remove from saved locations
+      setSavedLocations(prev => prev.filter(loc => 
+        loc.coordinates[0] !== lngLat[0] || loc.coordinates[1] !== lngLat[1]
+      ));
+    });
+
+    // If name is provided, save the location
+    if (name) {
+      saveLocation(lngLat, name);
+    }
+  };
+
+  // Function to load saved locations
+  const loadSavedLocations = () => {
+    if (!user || !map.current) return;
+    setSavedLocations(user.savedLocations);
+    user.savedLocations.forEach(location => {
+      addMarker(location.coordinates, location.name);
     });
   };
 
   useEffect(() => {
     if (!mapContainer.current) return;
+
+    console.log('DEBUG: Initializing Map:', {
+      center,
+      zoom,
+      style: 'mapbox://styles/mapbox/light-v11'
+    });
 
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
@@ -272,7 +326,24 @@ export default function Map({ center = [-74.5, 40], zoom = 9 }: MapProps) {
       zoom: 2,
       interactive: true,
       dragRotate: true,
+      minZoom: 1.5,
+      maxZoom: 3,
+      projection: 'globe',
+      doubleClickZoom: false
     });
+
+    // Add event listener for flyToLocation
+    const handleFlyToLocation = (event: CustomEvent) => {
+      if (!map.current) return;
+      const { coordinates, zoom } = event.detail;
+      map.current.flyTo({
+        center: coordinates,
+        zoom: zoom,
+        duration: 2000
+      });
+    };
+
+    window.addEventListener('flyToLocation', handleFlyToLocation as EventListener);
 
     // Add geocoder control
     const geocoder = new MapboxGeocoder({
@@ -289,22 +360,51 @@ export default function Map({ center = [-74.5, 40], zoom = 9 }: MapProps) {
 
     // Handle geocoder result
     geocoder.on('result', (event: any) => {
+      const currentZoom = map.current?.getZoom() || 0;
+      if (currentZoom < 2.5) {
+        alert('Please zoom in to add pins');
+        return;
+      }
       const coordinates = event.result.center as [number, number];
-      addMarker(coordinates);
-      map.current?.flyTo({
-        center: coordinates,
-        zoom: 12
-      });
-    });
-
-    // Add click event to place markers
-    map.current.on('click', (e) => {
-      addMarker([e.lngLat.lng, e.lngLat.lat]);
+      const name = event.result.place_name;
+      if (!isLocationExists(coordinates)) {
+        addMarker(coordinates, name);
+        map.current?.flyTo({
+          center: coordinates,
+          zoom: 12
+        });
+      }
     });
 
     map.current.on('load', () => {
-      console.log('DEBUG: Map loaded successfully');
+      console.log('DEBUG: Map Loaded:', {
+        initialZoom: map.current?.getZoom(),
+        projection: map.current?.getProjection(),
+        style: map.current?.getStyle().name,
+        is2D: is2DView
+      });
+
       addCustomLayers();
+      loadSavedLocations();
+      toggleMarkersVisibility(is2DView);
+
+      // Add zoom change listener with debounce
+      let zoomTimeout: NodeJS.Timeout;
+      map.current?.on('zoom', () => {
+        clearTimeout(zoomTimeout);
+        zoomTimeout = setTimeout(() => {
+          handleZoomChange();
+        }, 100);
+      });
+
+      // Add continuous zoom level logging
+      map.current?.on('zoom', () => {
+        console.log('DEBUG: Current Zoom:', {
+          level: map.current?.getZoom(),
+          is2D: is2DView,
+          projection: map.current?.getProjection()
+        });
+      });
 
       // Add hover interactions
       map.current?.on('mousemove', 'country-boundaries', (e) => {
@@ -346,149 +446,39 @@ export default function Map({ center = [-74.5, 40], zoom = 9 }: MapProps) {
         setTooltip(null);
       });
 
-      // Add click interaction
-      map.current?.on('click', 'country-boundaries', (e) => {
-        const now = Date.now();
-        if (now - lastClickTime.current < CLICK_COOLDOWN) {
-          console.log('DEBUG: Click ignored - cooldown period');
+      // Add click event to place markers
+      map.current?.on('click', (e) => {
+        const currentZoom = map.current?.getZoom() || 0;
+        console.log('DEBUG: Map click:', {
+          is2D: is2DView,
+          currentZoom,
+          coordinates: [e.lngLat.lng, e.lngLat.lat]
+        });
+
+        if (currentZoom < 2.5) {
+          alert('Please zoom in to add pins');
           return;
         }
-        lastClickTime.current = now;
 
-        if (e.features && e.features.length > 0) {
-          const clickedCountryId = e.features[0].id as string;
-          const clickedCountry = e.features[0];
-          const countryName = clickedCountry.properties?.name_en || 'Unknown Country';
-          
-          console.log('DEBUG: Click event details:', {
-            clickedCountryId,
-            selectedCountry: selectedCountryRef.current,
-            countryName,
-            featureState: map.current?.getFeatureState({ source: 'countries', sourceLayer: 'country_boundaries', id: clickedCountryId })
-          });
-          
-          // If clicking the same country, ignore
-          if (clickedCountryId === selectedCountryRef.current) {
-            console.log('DEBUG: Click ignored - same country');
-            return;
+        const coordinates: [number, number] = [e.lngLat.lng, e.lngLat.lat];
+        if (!isLocationExists(coordinates)) {
+          const name = prompt('Enter a name for this location:');
+          if (name) {
+            addMarker(coordinates, name);
           }
-          
-          console.log('DEBUG: Country clicked:', {
-            id: clickedCountryId,
-            name: countryName,
-            geometryType: clickedCountry.geometry.type,
-            geometry: clickedCountry.geometry,
-            properties: clickedCountry.properties
-          });
-
-          // Set new selection
-          setSelection(clickedCountryId);
-
-          // Calculate bounds from geometry
-          if (clickedCountry.geometry) {
-            let bounds;
-            if (clickedCountry.geometry.type === 'Polygon') {
-              const geometry = clickedCountry.geometry as PolygonGeometry;
-              bounds = calculateBounds(geometry.coordinates[0]);
-            } else if (clickedCountry.geometry.type === 'MultiPolygon') {
-              const geometry = clickedCountry.geometry as MultiPolygonGeometry;
-              // Use the first polygon for now
-              bounds = calculateBounds(geometry.coordinates[0][0]);
-            }
-
-            if (bounds) {
-              const zoomLevel = calculateZoomLevel(bounds);
-              const adjustedCenter = adjustCenterForLargeCountries(bounds, countryName);
-              
-              console.log('DEBUG: Calculated bounds and zoom:', {
-                ...bounds,
-                zoomLevel,
-                adjustedCenter,
-                currentZoom: map.current?.getZoom()
-              });
-
-              // First transition to 2D view
-              map.current?.easeTo({
-                center: adjustedCenter,
-                zoom: zoomLevel,
-                duration: 2000, // Longer duration for smoother transition
-                essential: true,
-                pitch: 0,
-                bearing: 0
-              });
-
-              // Then change the style and projection to 2D
-              setTimeout(() => {
-                if (map.current) {
-                  // Update zoom constraints for 2D view
-                  map.current.setMinZoom(4);
-                  map.current.setMaxZoom(10);
-                  // Change to 2D style
-                  handleStyleChange('mapbox://styles/mapbox/streets-v12', false);
-                }
-              }, 1000);
-            }
-          } else {
-            console.warn('DEBUG: No valid geometry found for country:', clickedCountryId);
-          }
-        }
-      });
-
-      // Add click outside to reset
-      map.current?.on('click', (e) => {
-        const features = map.current?.queryRenderedFeatures(e.point, {
-          layers: ['country-boundaries']
-        });
-        
-        if (!features || features.length === 0) {
-          console.log('DEBUG: Clicking outside - resetting view');
-          resetSelection();
-          
-          // Reset to global view with default zoom
-          map.current?.easeTo({
-            center: [-74.5, 40],
-            zoom: 2,
-            duration: 2000, // Longer duration for smoother transition
-            essential: true,
-            pitch: 0,
-            bearing: 0
-          });
-
-          // Reset to globe view
-          setTimeout(() => {
-            if (map.current) {
-              // Reset zoom constraints for globe view
-              map.current.setMinZoom(1.5);
-              map.current.setMaxZoom(4);
-              // Change back to globe projection
-              handleStyleChange('mapbox://styles/mapbox/light-v11', true);
-            }
-          }, 1000);
-        }
-      });
-
-      // Add zoom change listener to track zoom levels (with debounce)
-      let zoomTimeout: NodeJS.Timeout;
-      map.current?.on('zoom', () => {
-        if (map.current) {
-          clearTimeout(zoomTimeout);
-          zoomTimeout = setTimeout(() => {
-            console.log('DEBUG: Current view state:', {
-              projection: map.current?.getProjection(),
-              zoom: map.current?.getZoom(),
-              minZoom: map.current?.getMinZoom(),
-              maxZoom: map.current?.getMaxZoom()
-            });
-          }, 100); // Only log after zoom has stopped for 100ms
         }
       });
     });
 
     return () => {
+      if (styleChangeTimeout.current) {
+        clearTimeout(styleChangeTimeout.current);
+      }
+      window.removeEventListener('flyToLocation', handleFlyToLocation as EventListener);
       map.current?.remove();
       markers.current.forEach(marker => marker.remove());
     };
-  }, []);
+  }, [user]);
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>

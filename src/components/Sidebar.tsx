@@ -14,6 +14,7 @@ export const Sidebar: React.FC = () => {
   const [search, setSearch] = useState('');
   const [isEditMode, setIsEditMode] = useState(false);
   const [selectedLocations, setSelectedLocations] = useState<Set<string>>(new Set());
+  const [expandedUser, setExpandedUser] = useState<string | null>(null);
 
   if (!user) {
     return (
@@ -85,6 +86,16 @@ export const Sidebar: React.FC = () => {
   // For displaying followed influencers (from both sources)
   const allById: { [id: string]: Influencer } = {};
   allSearchables.forEach(i => { allById[i.id] = i; });
+
+  // Function to get saved locations for a followed user/influencer
+  const getSavedLocations = (id: string): SavedLocation[] => {
+    const influencer = allById[id];
+    if (influencer?.savedLocations) {
+      return influencer.savedLocations;
+    }
+    const followedUser = allUsers.find(u => u.id === id);
+    return followedUser?.savedLocations || [];
+  };
 
   // Function to select a location
   const selectLocation = (locationId: string) => {
@@ -166,6 +177,44 @@ export const Sidebar: React.FC = () => {
     window.dispatchEvent(event);
   };
 
+  // Function to add a location from followed user
+  const addLocationFromUser = (location: SavedLocation) => {
+    if (!user) return;
+
+    // Check if location already exists
+    const locationExists = user.savedLocations.some(
+      loc => loc.coordinates[0] === location.coordinates[0] && 
+             loc.coordinates[1] === location.coordinates[1]
+    );
+
+    if (locationExists) return;
+
+    // Add location to user's saved locations
+    const updatedUser = {
+      ...user,
+      savedLocations: [...user.savedLocations, location]
+    };
+
+    // Update localStorage
+    localStorage.setItem('user', JSON.stringify(updatedUser));
+    
+    // Update users array in localStorage
+    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    const idx = users.findIndex((u: any) => u.email === user.email);
+    if (idx !== -1) {
+      users[idx] = updatedUser;
+      localStorage.setItem('users', JSON.stringify(users));
+    }
+
+    // Force a page reload to refresh the sidebar
+    window.location.reload();
+  };
+
+  // Function to toggle expanded user view
+  const toggleExpandedUser = (userId: string) => {
+    setExpandedUser(expandedUser === userId ? null : userId);
+  };
+
   return (
     <div className="w-80 h-full bg-white shadow-lg p-4 flex flex-col">
       <div className="flex justify-between items-center mb-6">
@@ -223,46 +272,49 @@ export const Sidebar: React.FC = () => {
           <ul className="space-y-2">
             {user.followedInfluencers.map((fid) => {
               const inf = allById[fid];
+              const savedLocations = getSavedLocations(fid);
               return inf ? (
-                <li key={fid} className="flex items-center justify-between bg-gray-50 rounded p-2">
-                  <div className="flex items-center">
-                    <img src={inf.avatar} alt={inf.name} className="w-6 h-6 rounded-full mr-2" />
-                    <span>{inf.name}</span>
-                  </div>
-                  <div className="flex space-x-2">
-                    <button
-                      onClick={() => {
-                        // Dispatch event to add pin
-                        const event = new CustomEvent('addPin', {
-                          detail: {
-                            id: inf.id,
-                            name: inf.name,
-                            coordinates: [0, 0], // Default coordinates, will be updated by Map component
-                            type: 'followed'
-                          }
-                        });
-                        window.dispatchEvent(event);
-                      }}
-                      className="px-2 py-1 bg-green-500 text-white rounded hover:bg-green-600 text-xs"
-                    >
-                      Add Pin
-                    </button>
-                    <button
-                      onClick={() => {
-                        // Dispatch event to remove pin
-                        const event = new CustomEvent('removePin', {
-                          detail: {
-                            id: inf.id,
-                            type: 'followed'
-                          }
-                        });
-                        window.dispatchEvent(event);
-                      }}
-                      className="px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-xs"
-                    >
-                      Remove Pin
+                <li key={fid} className="bg-gray-50 rounded p-2">
+                  <div 
+                    className="flex items-center justify-between cursor-pointer"
+                    onClick={() => toggleExpandedUser(fid)}
+                  >
+                    <div className="flex items-center">
+                      <img src={inf.avatar} alt={inf.name} className="w-6 h-6 rounded-full mr-2" />
+                      <span>{inf.name}</span>
+                    </div>
+                    <button className="text-gray-500">
+                      {expandedUser === fid ? '▼' : '▶'}
                     </button>
                   </div>
+                  {expandedUser === fid && savedLocations.length > 0 && (
+                    <div className="mt-2 pl-8">
+                      <h4 className="text-sm font-medium mb-2">Saved Locations:</h4>
+                      <ul className="space-y-2">
+                        {savedLocations.map((location) => (
+                          <li key={location.id} className="bg-white rounded p-2">
+                            <div className="flex justify-between items-center">
+                              <div>
+                                <div className="font-medium">{location.name}</div>
+                                <div className="text-xs text-gray-500">
+                                  {location.coordinates[0].toFixed(4)}, {location.coordinates[1].toFixed(4)}
+                                </div>
+                                {location.description && (
+                                  <div className="text-xs text-gray-600 mt-1">{location.description}</div>
+                                )}
+                              </div>
+                              <button
+                                onClick={() => addLocationFromUser(location)}
+                                className="px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-xs"
+                              >
+                                Add
+                              </button>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </li>
               ) : null;
             })}
